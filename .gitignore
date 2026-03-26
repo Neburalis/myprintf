@@ -1,0 +1,28 @@
+# Compiled executables
+*.com
+*.exe
+*.out
+
+# Object files
+*.o
+*.obj
+
+# Linker output
+*.map
+
+# Assembler listings
+*.lst
+
+# Turbo Debugger symbols
+*.tds
+
+# Backup files
+*.bak
+*.orig
+
+# Turbo C / Borland temporary files
+*.~*
+
+# IDE
+.vscode
+.idea
