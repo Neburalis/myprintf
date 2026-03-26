@@ -1,8 +1,10 @@
 #!/bin/bash
 
-echo "nasm -f elf64 -l myprintf.lst  myprintf.asm"
-nasm -f elf64 -l myprintf.lst  myprintf.asm
-echo "ld -s -o myprintf.out myprintf.o"
-ld -s -o myprintf.out myprintf.o
+echo "nasm -g -f elf64 -l myprintf.lst  myprintf.asm"
+nasm -g -f elf64 -l myprintf.lst  myprintf.asm
+
+echo "ld -o myprintf.out myprintf.o"
+ld -o myprintf.out myprintf.o
+
 echo "./myprintf.out"
 ./myprintf.out

@@ -252,29 +252,29 @@ align 8
 ; Индекс: (*fmt - 'b')
 ; Диапазон: 'b'..'x'
 jmp_table:
-    dq case_b        ; 'b'
-    dq case_c        ; 'c'
-    dq case_d        ; 'd'
-    dq case_default  ; 'e'
-    dq case_default  ; 'f'
-    dq case_default  ; 'g'
-    dq case_default  ; 'h'
-    dq case_default  ; 'i'
-    dq case_default  ; 'j'
-    dq case_default  ; 'k'
-    dq case_default  ; 'l'
-    dq case_default  ; 'm'
-    dq case_default  ; 'n'
-    dq case_o        ; 'o'
-    dq case_default  ; 'p'
-    dq case_default  ; 'q'
-    dq case_default  ; 'r'
-    dq case_s        ; 's'
-    dq case_default  ; 't'
-    dq case_u        ; 'u'
-    dq case_default  ; 'v'
-    dq case_default  ; 'w'
-    dq case_x        ; 'x'
+    dq printer.case_b        ; 'b'
+    dq printer.case_c        ; 'c'
+    dq printer.case_d        ; 'd'
+    dq printer.case_default  ; 'e'
+    dq printer.case_default  ; 'f'
+    dq printer.case_default  ; 'g'
+    dq printer.case_default  ; 'h'
+    dq printer.case_default  ; 'i'
+    dq printer.case_default  ; 'j'
+    dq printer.case_default  ; 'k'
+    dq printer.case_default  ; 'l'
+    dq printer.case_default  ; 'm'
+    dq printer.case_default  ; 'n'
+    dq printer.case_o        ; 'o'
+    dq printer.case_default  ; 'p'
+    dq printer.case_default  ; 'q'
+    dq printer.case_default  ; 'r'
+    dq printer.case_s        ; 's'
+    dq printer.case_default  ; 't'
+    dq printer.case_u        ; 'u'
+    dq printer.case_default  ; 'v'
+    dq printer.case_default  ; 'w'
+    dq printer.case_x        ; 'x'
 
 section .text
 
@@ -375,7 +375,7 @@ printer:
     je    .percent
 
     ; putchar(*fmt)
-    movzx rdi, byte [r12]
+    mov   rdi, rax
     call  putchar
 
     ; ++fmt
@@ -408,82 +408,81 @@ printer:
     cmp   ebx, 5
     jl    .from_ptr1
 
-    mov rax, rbx
+    mov   rax, rbx
     sub   rax, 5
     shl   rax, 3
     lea   rdi, [r14 + rax]
     jmp   .dispatch
 
 .from_ptr1:
-    mov rax, rbx
-    shl   rax, 3
-    lea   rdi, [r13 + rax]
+    mov   rcx, rbx
+    shl   rcx, 3
+    lea   rdi, [r13 + rcx]
 
 .dispatch:
-    ; eax = *fmt
-    movzx rax, byte [r12]
+    ; *fmt уже лежит в rax
 
     ; Нормализуем индекс: 'b' -> 0
     sub   rax, 'b'
     cmp   rax, ('x' - 'b')
-    ja    case_default
+    ja    .case_default
 
     mov   rax, [rel jmp_table + rax*8]
     jmp   rax
 
-case_b:
+.case_b:
     ; putbin(arg_ptr)
     call  putbin
-    jmp   printer.after_spec
+    jmp   .after_spec
 
-case_c:
+.case_c:
     ; putchar(*arg_ptr)
     movzx edi, byte [rdi]
     call  putchar
-    jmp   printer.after_spec
+    jmp   .after_spec
 
-case_d:
+.case_d:
     ; putint(*arg_ptr)
     movzx rdi, byte [rdi]
     call  putint
-    jmp   printer.after_spec
+    jmp   .after_spec
 
-case_o:
+.case_o:
     ; putoct(*arg_ptr)
     movzx rdi, byte [rdi]
     call  putoct
-    jmp   printer.after_spec
+    jmp   .after_spec
 
-case_s:
+.case_s:
     ; putstr(arg_ptr)
     call  putstr
-    jmp   printer.after_spec
+    jmp   .after_spec
 
-case_u:
+.case_u:
     ; putuint(*arg_ptr)
     movzx rdi, byte [rdi]
     call  putuint
-    jmp   printer.after_spec
+    jmp   .after_spec
 
-case_x:
+.case_x:
     ; puthex(*arg_ptr)
     movzx rdi, byte [rdi]
     call  puthex
-    jmp   printer.after_spec
+    jmp   .after_spec
 
-case_default:
+.case_default:
     ; UB -> просто выходим
-    jmp   printer.done
+    jmp   .done
 
-printer.after_spec:
+.after_spec:
     ; ++arg_count
     inc   ebx
 
     ; ++fmt
     inc   r12
-    jmp   printer.loop
+    jmp   .loop
 
-printer.done:
+.done:
     xor   rax, rax
 
     pop   r14
@@ -495,6 +494,14 @@ printer.done:
 
 ; ============= Program entry ================================================
 _start:
+
+    push 12345
+    mov rsi, rsp
+
+    ; mov rdi, [rsi]
+    ; call putint
+
+    lea rdi, [rel TestFMT]
     call printer
 
     mov rdi, 0x0A
@@ -505,3 +512,4 @@ _start:
 section .data
 
 TestPutstr: db "putstr test", 0x0A, 0
+TestFMT:    db "Hello, World!", 0x0A, "%d", 0x0A, 0
