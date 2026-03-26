@@ -14,16 +14,16 @@ all: $(TARGET)
 
 # === build ===
 $(OBJ): $(SRC)
-	@echo "$(ASM) $(ASMFLAGS) $<"
+	@#echo "$(ASM) $(ASMFLAGS) $<"
 	$(ASM) $(ASMFLAGS) $<
 
 $(TARGET): $(OBJ)
-	@echo "$(LD) -o $@ $<"
+	@#echo "$(LD) -o $@ $<"
 	$(LD) -o $@ $<
 
 # === run ===
 run: $(TARGET)
-	@echo "./$(TARGET)"
+	@#echo "./$(TARGET)"
 	./$(TARGET)
 
 # === debug (опционально) ===

@@ -11,6 +11,7 @@ section .text
     global putbin
     global putchar
     global putstr
+    global printer
 
     %include "linux64_macro.asm"
 
@@ -252,29 +253,29 @@ align 8
 ; Индекс: (*fmt - 'b')
 ; Диапазон: 'b'..'x'
 jmp_table:
-    dq printer.case_b        ; 'b'
-    dq printer.case_c        ; 'c'
-    dq printer.case_d        ; 'd'
-    dq printer.case_default  ; 'e'
-    dq printer.case_default  ; 'f'
-    dq printer.case_default  ; 'g'
-    dq printer.case_default  ; 'h'
-    dq printer.case_default  ; 'i'
-    dq printer.case_default  ; 'j'
-    dq printer.case_default  ; 'k'
-    dq printer.case_default  ; 'l'
-    dq printer.case_default  ; 'm'
-    dq printer.case_default  ; 'n'
-    dq printer.case_o        ; 'o'
-    dq printer.case_default  ; 'p'
-    dq printer.case_default  ; 'q'
-    dq printer.case_default  ; 'r'
-    dq printer.case_s        ; 's'
-    dq printer.case_default  ; 't'
-    dq printer.case_u        ; 'u'
-    dq printer.case_default  ; 'v'
-    dq printer.case_default  ; 'w'
-    dq printer.case_x        ; 'x'
+    dq printer.internal.case_b        ; 'b'
+    dq printer.internal.case_c        ; 'c'
+    dq printer.internal.case_d        ; 'd'
+    dq printer.internal.case_default  ; 'e'
+    dq printer.internal.case_default  ; 'f'
+    dq printer.internal.case_default  ; 'g'
+    dq printer.internal.case_default  ; 'h'
+    dq printer.internal.case_default  ; 'i'
+    dq printer.internal.case_default  ; 'j'
+    dq printer.internal.case_default  ; 'k'
+    dq printer.internal.case_default  ; 'l'
+    dq printer.internal.case_default  ; 'm'
+    dq printer.internal.case_default  ; 'n'
+    dq printer.internal.case_o        ; 'o'
+    dq printer.internal.case_default  ; 'p'
+    dq printer.internal.case_default  ; 'q'
+    dq printer.internal.case_default  ; 'r'
+    dq printer.internal.case_s        ; 's'
+    dq printer.internal.case_default  ; 't'
+    dq printer.internal.case_u        ; 'u'
+    dq printer.internal.case_default  ; 'v'
+    dq printer.internal.case_default  ; 'w'
+    dq printer.internal.case_x        ; 'x'
 
 section .text
 
@@ -346,6 +347,33 @@ section .text
 ; }
 ;
 printer:
+    ; SysV x86-64 ABI trampoline for C: printer(fmt, ...)
+    ; rdi  - fmt
+    ; rsi  - 1st arg
+    ; rdx  - 2nd arg
+    ; rcx  - 3rd arg
+    ; r8   - 4th arg
+    ; r9   - 5th arg
+    ; 6th+ continue in caller stack at [rbp+16] after call/ret address
+    push rbp
+    mov  rbp, rsp
+    sub  rsp, 48
+
+    mov  [rsp],    rsi
+    mov  [rsp+8],  rdx
+    mov  [rsp+16], rcx
+    mov  [rsp+24], r8
+    mov  [rsp+32], r9
+
+    lea  rsi, [rsp]
+    lea  rdx, [rbp+16]
+    call printer.internal
+
+    add  rsp, 48
+    pop  rbp
+    ret
+
+printer.internal:
     push rbp
     mov  rbp, rsp
 
