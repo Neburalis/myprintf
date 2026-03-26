@@ -408,14 +408,14 @@ printer:
     cmp   ebx, 5
     jl    .from_ptr1
 
-    movzx rax, ebx
+    mov rax, rbx
     sub   rax, 5
     shl   rax, 3
     lea   rdi, [r14 + rax]
     jmp   .dispatch
 
 .from_ptr1:
-    movzx rax, ebx
+    mov rax, rbx
     shl   rax, 3
     lea   rdi, [r13 + rax]
 
@@ -438,7 +438,7 @@ case_b:
 
 case_c:
     ; putchar(*arg_ptr)
-    movzx dil, byte [rdi]
+    movzx edi, byte [rdi]
     call  putchar
     jmp   printer.after_spec
 
