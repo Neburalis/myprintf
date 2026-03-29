@@ -2,6 +2,8 @@
 ; myprintf.asm  - minimal demo for syscall-based printing and exit
 ; =============================================================================
 
+default rel
+
 section .text
     global _start
     global puthex
@@ -52,7 +54,7 @@ puthex:
     jne .convert
 
 .emit:
-    write_no_pie 1, rsi, r9
+    write 1, rsi, r9
 
     add rsp, 24
     ret
@@ -63,6 +65,7 @@ puthex:
 ; prints unsigned integer in decimal to stdout.
 ;   rdi = number
 putuint:
+push rbx
     sub rsp, 40
     mov rax, rdi
     lea rsi, [rsp+39]
@@ -92,9 +95,10 @@ putuint:
     jnz .zaloop
 
 .emit:
-    write_no_pie 1, rsi, rcx
+    write 1, rsi, rcx
 
     add rsp, 40
+    pop rbx
     ret
 
 ; =============================================================================
@@ -109,7 +113,9 @@ putint:
 
     mov byte [rsp+23], '-'
     lea rsi, [rsp+23]
-    write_no_pie 1, rsi, 1
+    push rdi
+    write 1, rsi, 1
+    pop rdi
 
     neg rdi
     jo .putint_min
@@ -165,7 +171,7 @@ putoct:
     jnz .zaloop
 
 .emit:
-    write_no_pie 1, rsi, rcx
+    write 1, rsi, rcx
 
     add rsp, 40
     ret
@@ -203,7 +209,7 @@ putbin:
     jnz .bin_loop
 
 .bin_emit:
-    write_no_pie 1, rsi, rcx
+    write 1, rsi, rcx
 
     add rsp, 80
     ret
@@ -216,7 +222,7 @@ putbin:
 putchar:
     sub rsp, 16
     mov byte [rsp], dil
-    write_no_pie 1, rsp, 1
+    write 1, rsp, 1
     add rsp, 16
     ret
 
@@ -240,7 +246,7 @@ putstr:
 .len_done:
     test rcx, rcx
     jz .empty
-    write_no_pie 1, rdi, rcx
+    write 1, rsi, rcx
 
 .empty:
     ret
@@ -471,30 +477,31 @@ printer.internal:
 
 .case_d:
     ; putint(*arg_ptr)
-    movzx rdi, byte [rdi]
+    mov   rdi, [rdi]
     call  putint
     jmp   .after_spec
 
 .case_o:
     ; putoct(*arg_ptr)
-    movzx rdi, byte [rdi]
+    mov   rdi, [rdi]
     call  putoct
     jmp   .after_spec
 
 .case_s:
     ; putstr(arg_ptr)
+    mov   rdi, [rdi]
     call  putstr
     jmp   .after_spec
 
 .case_u:
     ; putuint(*arg_ptr)
-    movzx rdi, byte [rdi]
+    mov   rdi, [rdi]
     call  putuint
     jmp   .after_spec
 
 .case_x:
     ; puthex(*arg_ptr)
-    movzx rdi, byte [rdi]
+    mov   rdi, [rdi]
     call  puthex
     jmp   .after_spec
 
@@ -523,14 +530,16 @@ printer.internal:
 ; ============= Program entry ================================================
 _start:
 
-    push 12345
+    lea rdi, [rel Message]
+    push rdi
+    push qword -1
     mov rsi, rsp
 
     ; mov rdi, [rsi]
     ; call putint
 
     lea rdi, [rel TestFMT]
-    call printer
+    call printer.internal
 
     mov rdi, 0x0A
     call putchar
@@ -539,5 +548,5 @@ _start:
 
 section .data
 
-TestPutstr: db "putstr test", 0x0A, 0
-TestFMT:    db "Hello, World!", 0x0A, "%d", 0x0A, 0
+Message:    db "putstr test", 0x0A, 0
+TestFMT:    db "%%", 0x0A, "%d", 0x0A, "%s", 0x0A, 0

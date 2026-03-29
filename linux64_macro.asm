@@ -22,11 +22,11 @@
 ;
 %macro write_no_pie 3
     mov     eax, 1          ; write
-    %ifnidni %1, edi
-        mov     edi, %1     ; fd
-    %endif
     %ifnidni %2, rsi
         mov     rsi, %2     ; buf
+    %endif
+    %ifnidni %1, edi
+        mov     edi, %1     ; fd
     %endif
     %ifnidni %3, rdx
         mov     rdx, %3     ; len
@@ -54,10 +54,10 @@
 ;
 %macro write 3
     mov     eax, 1          ; write
+    lea     rsi, [rel %2]   ; buf
     %ifnidni %1, edi
         mov     edi, %1     ; fd
     %endif
-    lea     rsi, [rel %2]   ; buf
     %ifnidni %3, rdx
         mov     rdx, %3     ; len
     %endif
