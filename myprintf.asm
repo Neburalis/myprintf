@@ -5,6 +5,7 @@
 default rel
 
 section .text
+    global putbase
     global puthex
     global putint
     global putuint
@@ -17,52 +18,90 @@ section .text
     %include "linux64_macro.asm"
 
 ; =============================================================================
-; void puthex(uint64_t a);
+; void putbase(uint64_t n, uint64_t base)
 ; =============================================================================
-; prints the number in hexadecimal to stdout using Linux write syscall.
-;   rdi = number
-puthex:
-    sub rsp, 24
-    mov rdx, rdi
-    lea rsi, [rsp+23]
-    xor r9d, r9d
+; prints number in given base to stdout (supports bases 2–36).
+;
+; IN:
+;   rdi = n    (number to print)
+;   rsi = base (2..36; values > 36 are silently ignored)
+; OUT:
+;   eax = number of bytes written (0 if base > 36)
+; DESTR:
+;   rax, rcx, rdx, rdi, rsi
+putbase:
+    push rbx
+    sub  rsp, 80
+    mov  rax, rdi
+    cmp  rsi, 36
+    ja  .early_exit
+    mov  rbx, rsi
+    lea  rsi, [rsp+79]
+    xor  rcx, rcx
 
-    test rdx, rdx
-    jnz .convert
+    test rax, rax
+    jnz  .convert
 
-    dec rsi
-    mov byte [rsi], '0'
-    inc r9
-    jmp .emit
+    dec  rsi
+    mov  byte [rsi], '0'
+    inc  rcx
+    jmp  .emit
 
 .convert:
-    mov al, dl
-    and al, 0x0F
-    add al, '0'
-    cmp al, '9'
-    jle .digit_ready
-    add al, 39
-
-.digit_ready:
-    dec rsi
-    mov byte [rsi], al
-    inc r9
-
-    shr rdx, 4
-    test rdx, rdx
-    jne .convert
+    xor  edx, edx
+    div  rbx
+    cmp  dl, 10
+    jl   .decimal
+    add  dl, 'a' - 10
+    jmp  .store
+.decimal:
+    add  dl, '0'
+.store:
+    dec  rsi
+    mov  byte [rsi], dl
+    inc  rcx
+    test rax, rax
+    jnz  .convert
 
 .emit:
-    write 1, rsi, r9
+    write 1, rsi, rcx
+    mov  eax, edx          ; rdx = rcx (set by write macro), survives syscall
+    jmp  .epilogue
 
-    add rsp, 24
+.early_exit:
+    xor  eax, eax          ; invalid base — nothing printed
+
+.epilogue:
+    add  rsp, 80
+    pop  rbx
     ret
 
 ; =============================================================================
-; void putuint(uint64_t a);
+; void puthex(uint64_t a)
+; =============================================================================
+; prints number in hexadecimal (lowercase) to stdout.
+;
+; IN:
+;   rdi = a (number to print)
+; OUT:
+;   eax = number of bytes written
+; DESTR:
+;   rax, rcx, rdx, rdi, rsi
+puthex:
+    mov  rsi, 16
+    jmp  putbase
+
+; =============================================================================
+; void putuint(uint64_t a)
 ; =============================================================================
 ; prints unsigned integer in decimal to stdout.
-;   rdi = number
+;
+; IN:
+;   rdi = a (number to print)
+; OUT:
+;   eax = number of bytes written
+; DESTR:
+;   rax, rcx, rdx, rdi, rsi
 putuint:
 push rbx
     sub rsp, 40
@@ -95,16 +134,23 @@ push rbx
 
 .emit:
     write 1, rsi, rcx
+    mov  eax, edx          ; rdx = rcx (set by write macro), survives syscall
 
     add rsp, 40
     pop rbx
     ret
 
 ; =============================================================================
-; void putint(int64_t a);
+; void putint(int64_t a)
 ; =============================================================================
 ; prints signed integer in decimal to stdout.
-;   rdi = number
+;
+; IN:
+;   rdi = a (number to print)
+; OUT:
+;   eax = number of bytes written (digits + 1 for '-' if negative)
+; DESTR:
+;   rax, rcx, rdx, rdi, rsi
 putint:
     sub rsp, 24
     test rdi, rdi
@@ -117,120 +163,79 @@ putint:
     pop rdi
 
     neg rdi
-    jo .putint_min
-    jmp .putint_positive
+
+    call putuint
+    inc  eax               ; +1 for the '-' sign
+    add rsp, 24
+    ret
 
 .putint_positive:
-    call putuint
+    call putuint           ; eax = digit count
     add rsp, 24
     ret
-
-.putint_min:
-    write 1, Int64MinValue, Int64MinValueLen
-    add rsp, 24
-    ret
-
-section .data
-
-Int64MinValue: db "9223372036854775808"
-Int64MinValueLen equ $ - Int64MinValue
-
-section .text
 
 ; =============================================================================
-; void putoct(uint64_t a);
+; void putoct(uint64_t a)
 ; =============================================================================
 ; prints number in octal to stdout.
-;   rdi = number to print
+;
+; IN:
+;   rdi = a (number to print)
+; OUT:
+;   eax = number of bytes written
+; DESTR:
+;   rax, rcx, rdx, rdi, rsi
 putoct:
-    sub rsp, 40
-    mov rax, rdi
-    lea rsi, [rsp+39]
-    xor rcx, rcx
-
-    test rax, rax
-    jnz .zaloop
-
-    dec rsi
-    mov byte [rsi], '0'
-    inc rcx
-    jmp .emit
-
-.zaloop:
-    mov rdx, rax
-    and rdx, 7
-    add dl, '0'
-
-    dec rsi
-    mov byte [rsi], dl
-    inc rcx
-
-    shr rax, 3
-    test rax, rax
-    jnz .zaloop
-
-.emit:
-    write 1, rsi, rcx
-
-    add rsp, 40
-    ret
+    mov  rsi, 8
+    jmp  putbase
 
 ; =============================================================================
-; void putbin(uint64_t a);
+; void putbin(uint64_t a)
 ; =============================================================================
 ; prints number in binary to stdout.
-;   rdi = number
+;
+; IN:
+;   rdi = a (number to print)
+; OUT:
+;   eax = number of bytes written
+; DESTR:
+;   rax, rcx, rdx, rdi, rsi
 putbin:
-    sub rsp, 80
-    mov rax, rdi
-    lea rsi, [rsp+79]
-    xor rcx, rcx
-
-    test rax, rax
-    jnz .bin_loop
-
-    dec rsi
-    mov byte [rsi], '0'
-    inc rcx
-    jmp .bin_emit
-
-.bin_loop:
-    mov rdx, rax
-    and rdx, 1
-    add dl, '0'
-
-    dec rsi
-    mov byte [rsi], dl
-    inc rcx
-
-    shr rax, 1
-    test rax, rax
-    jnz .bin_loop
-
-.bin_emit:
-    write 1, rsi, rcx
-
-    add rsp, 80
-    ret
+    mov  rsi, 2
+    jmp  putbase
 
 ; =============================================================================
-; void putchar(char a);
+; void putchar(char a)
 ; =============================================================================
 ; prints one byte to stdout.
-;   dil = ch to print
+;
+; IN:
+;   dil = a (character to print)
+; OUT:
+;   eax = 1 (always one byte)
+; DESTR:
+;   rax, rdi, rsi, rdx
 putchar:
     sub rsp, 16
     mov byte [rsp], dil
     write 1, rsp, 1
+    mov  eax, 1
     add rsp, 16
     ret
 
 ; =============================================================================
-; void putstr(char* str);
+; void putstr(char* str)
 ; =============================================================================
 ; computes string length and writes entire string using one syscall.
-;   rdi -> str
+;
+; IN:
+;   rdi = str (pointer to null-terminated string; NULL is treated as empty)
+; OUT:
+;   eax = number of bytes written (0 for NULL or empty string)
+; DESTR:
+;   rax, rcx, rdi, rsi, rdx
 putstr:
+    xor  eax, eax
     test rdi, rdi
     jz .empty
     mov rsi, rdi
@@ -246,6 +251,7 @@ putstr:
     test rcx, rcx
     jz .empty
     write 1, rsi, rcx
+    mov  eax, edx          ; rdx = rcx (set by write macro), survives syscall
 
 .empty:
     ret
@@ -285,8 +291,24 @@ jmp_table:
 section .text
 
 ; =============================================================================
-; int32_t printer(char *fmt, uint8_t *ptr1, uint8_t *ptr2)
+; int32_t printer(char *fmt, ...)
 ; =============================================================================
+; SysV x86-64 ABI trampoline: spills register args to stack and delegates to
+; printer.internal.
+;
+; IN:
+;   rdi = fmt  (format string pointer)
+;   rsi = arg1
+;   rdx = arg2
+;   rcx = arg3
+;   r8  = arg4
+;   r9  = arg5
+;   [rbp+16].. = arg6+ (already on caller stack)
+; OUT:
+;   eax = total bytes written
+; DESTR:
+;   rax, rcx, rdx, rsi, r8, r9
+;
 ; calling convention:
 ;   rdi -> fmt
 ;   rsi -> ptr_to_arg1..5
@@ -378,14 +400,21 @@ printer:
     pop  rbp
     ret
 
+; =============================================================================
+; int32_t printer.internal(char *fmt, uint8_t *ptr1, uint8_t *ptr2)
+; =============================================================================
+; core format-string loop; called directly by printer trampoline.
+;
 ; IN:
-;   rdi -> fmt
-;   rsi == ptr1
-;   rdx == ptr2
+;   rdi = fmt  (pointer to format string)
+;   rsi = ptr1 (pointer to args 1–5 on stack, each 8 bytes)
+;   rdx = ptr2 (pointer to args 6+ on caller stack)
+; OUT:
+;   eax = total bytes written
 ; DESTR:
-;   rdi, rsi, rdx
-; USE:
-;   RBP - frame pointer
+;   rax, rcx, rdi, rsi, rdx
+; USE (local variables):
+;   rbp - frame pointer
 ;   r12 - fmt
 ;   r13 - ptr1
 ;   r14 - ptr2
@@ -403,15 +432,18 @@ printer.internal:
     push r12
     push r13
     push r14
+    push r15
 
     ; r12 = fmt
     ; r13 = ptr1
     ; r14 = ptr2
     ; ebx = arg_count
+    ; r15d = bytes written
     mov  r12, rdi
     mov  r13, rsi
     mov  r14, rdx
     xor  ebx, ebx
+    xor  r15d, r15d
 
 .loop:
     ; while (*fmt != '\0')
@@ -426,6 +458,7 @@ printer.internal:
     ; putchar(*fmt)
     mov   rdi, rax
     call  putchar
+    add   r15d, eax
 
     ; ++fmt
     inc   r12
@@ -446,6 +479,7 @@ printer.internal:
 
     mov   rdi, '%'
     call  putchar
+    add   r15d, eax
     inc   r12
     jmp   .loop
 
@@ -534,6 +568,8 @@ printer.internal:
     jmp   .done
 
 .after_spec:
+    add   r15d, eax        ; accumulate bytes from the last put* call
+
     ; ++arg_count
     inc   ebx
 
@@ -542,8 +578,9 @@ printer.internal:
     jmp   .loop
 
 .done:
-    xor   rax, rax
+    mov   eax, r15d        ; return total bytes written
 
+    pop   r15
     pop   r14
     pop   r13
     pop   r12
