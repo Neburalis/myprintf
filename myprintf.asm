@@ -5,7 +5,6 @@
 default rel
 
 section .text
-    global _start
     global puthex
     global putint
     global putuint
@@ -42,7 +41,7 @@ puthex:
     add al, '0'
     cmp al, '9'
     jle .digit_ready
-    add al, 7
+    add al, 39
 
 .digit_ready:
     dec rsi
@@ -259,29 +258,29 @@ align 8
 ; Индекс: (*fmt - 'b')
 ; Диапазон: 'b'..'x'
 jmp_table:
-    dq printer.internal.case_b        ; 'b'
-    dq printer.internal.case_c        ; 'c'
-    dq printer.internal.case_d        ; 'd'
-    dq printer.internal.case_default  ; 'e'
-    dq printer.internal.case_default  ; 'f'
-    dq printer.internal.case_default  ; 'g'
-    dq printer.internal.case_default  ; 'h'
-    dq printer.internal.case_default  ; 'i'
-    dq printer.internal.case_default  ; 'j'
-    dq printer.internal.case_default  ; 'k'
-    dq printer.internal.case_default  ; 'l'
-    dq printer.internal.case_default  ; 'm'
-    dq printer.internal.case_default  ; 'n'
-    dq printer.internal.case_o        ; 'o'
-    dq printer.internal.case_default  ; 'p'
-    dq printer.internal.case_default  ; 'q'
-    dq printer.internal.case_default  ; 'r'
-    dq printer.internal.case_s        ; 's'
-    dq printer.internal.case_default  ; 't'
-    dq printer.internal.case_u        ; 'u'
-    dq printer.internal.case_default  ; 'v'
-    dq printer.internal.case_default  ; 'w'
-    dq printer.internal.case_x        ; 'x'
+    dq printer.internal.case_b       - jmp_table ; 'b'
+    dq printer.internal.case_c       - jmp_table ; 'c'
+    dq printer.internal.case_d       - jmp_table ; 'd'
+    dq printer.internal.case_default - jmp_table ; 'e'
+    dq printer.internal.case_default - jmp_table ; 'f'
+    dq printer.internal.case_default - jmp_table ; 'g'
+    dq printer.internal.case_default - jmp_table ; 'h'
+    dq printer.internal.case_default - jmp_table ; 'i'
+    dq printer.internal.case_default - jmp_table ; 'j'
+    dq printer.internal.case_default - jmp_table ; 'k'
+    dq printer.internal.case_default - jmp_table ; 'l'
+    dq printer.internal.case_default - jmp_table ; 'm'
+    dq printer.internal.case_default - jmp_table ; 'n'
+    dq printer.internal.case_o       - jmp_table ; 'o'
+    dq printer.internal.case_default - jmp_table ; 'p'
+    dq printer.internal.case_default - jmp_table ; 'q'
+    dq printer.internal.case_default - jmp_table ; 'r'
+    dq printer.internal.case_s       - jmp_table ; 's'
+    dq printer.internal.case_default - jmp_table ; 't'
+    dq printer.internal.case_u       - jmp_table ; 'u'
+    dq printer.internal.case_default - jmp_table ; 'v'
+    dq printer.internal.case_default - jmp_table ; 'w'
+    dq printer.internal.case_x       - jmp_table ; 'x'
 
 section .text
 
@@ -379,6 +378,22 @@ printer:
     pop  rbp
     ret
 
+; IN:
+;   rdi -> fmt
+;   rsi == ptr1
+;   rdx == ptr2
+; DESTR:
+;   rdi, rsi, rdx
+; USE:
+;   RBP - frame pointer
+;   r12 - fmt
+;   r13 - ptr1
+;   r14 - ptr2
+;   rbx - arg_count
+;   rax - *fmt ; jmp addr
+;   rcx - tmp
+;   rdi - arg_ptr ; func input
+;
 printer.internal:
     push rbp
     mov  rbp, rsp
@@ -442,10 +457,13 @@ printer.internal:
     cmp   ebx, 5
     jl    .from_ptr1
 
-    mov   rax, rbx
-    sub   rax, 5
-    shl   rax, 3
-    lea   rdi, [r14 + rax]
+; .from_ptr2
+    ; rcx = (arg_count - 5) * 8
+    mov   rcx, rbx
+    sub   rcx, 5
+    shl   rcx, 3
+    ; rdi = ptr2 + rcx = ptr2 + (arg_count - 5) * 8
+    lea   rdi, [r14 + rcx]
     jmp   .dispatch
 
 .from_ptr1:
@@ -458,14 +476,18 @@ printer.internal:
 
     ; Нормализуем индекс: 'b' -> 0
     sub   rax, 'b'
-    cmp   rax, ('x' - 'b')
+    cmp   rax, ('x' - 'b') ; JT - диапазон 'b' - 'x'
     ja    .case_default
 
-    mov   rax, [rel jmp_table + rax*8]
+                                ; qword* jmp_table = {labels};
+    lea   rdx, [rel jmp_table]  ; rdx = jmp_table
+    mov   rax, [rdx + rax*8]    ; rax = *(jmp_table + label) = label - jmp_table
+    add   rax, rdx              ; rax = rdx - jmp_table + (label - jmp_table) = label
     jmp   rax
 
 .case_b:
-    ; putbin(arg_ptr)
+    ; putbin(*arg_ptr)
+    mov   rdi, [rdi]
     call  putbin
     jmp   .after_spec
 
@@ -506,6 +528,8 @@ printer.internal:
     jmp   .after_spec
 
 .case_default:
+    ; ERROR !
+    ; //TODO -  Error handing
     ; UB -> просто выходим
     jmp   .done
 

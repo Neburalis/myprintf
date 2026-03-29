@@ -1,32 +1,30 @@
 # === config ===
 ASM      = nasm
-LD       = ld
+CC       = gcc
 
 ASMFLAGS = -g -f elf64 -l myprintf.lst
-LDFLAGS  =
+CFLAGS   = -fPIC -g
 
 TARGET   = myprintf.out
-SRC      = myprintf.asm
-OBJ      = myprintf.o
 
 # === default target ===
 all: $(TARGET)
 
 # === build ===
-$(OBJ): $(SRC)
-	@#echo "$(ASM) $(ASMFLAGS) $<"
+myprintf.o: myprintf.asm
 	$(ASM) $(ASMFLAGS) $<
 
-$(TARGET): $(OBJ)
-	@#echo "$(LD) -o $@ $<"
-	$(LD) -o $@ $<
+main.o: main.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(TARGET): myprintf.o main.o
+	$(CC) $(CFLAGS) -o $@ myprintf.o main.o
 
 # === run ===
 run: $(TARGET)
-	@#echo "./$(TARGET)"
 	./$(TARGET)
 
-# === debug (опционально) ===
+# === debug ===
 gdb: $(TARGET)
 	gdb $(TARGET)
 
