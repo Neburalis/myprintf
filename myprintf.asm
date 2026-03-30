@@ -17,6 +17,14 @@ section .text
 
     %include "linux64_macro.asm"
 
+struc buf
+    .string     resq 1 ; char*
+    .capacity   resd 1 ; uint32_t
+    .size       resd 1 ; uint32_t
+endstruc
+
+TMP_BUF_SIZE equ 80
+
 ; =============================================================================
 ; void putbase(uint64_t n, uint8_t shift, uint8_t mask)
 ; =============================================================================
@@ -24,20 +32,22 @@ section .text
 ;
 ; IN:
 ;   rdi = n     (number to print)
-;   cl  = shift (1..5 corresponds base 2, 4, 8, 16, 32)
+;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
 ;   dl  = mask  (base - 1)
+;   cl  = shift (1..5 corresponds base 2, 4, 8, 16, 32)
 ; OUT:
 ;   eax = number of bytes written
+;   rsi = start of string (buf filled from end)
 ; DESTR:
-;   rax, rcx, rdx, rdi, rsi, r8-r11 (syscall)
+;   rax, rcx, rdx, rdi, rsi
 putbase:
     push    rbx
-    sub     rsp, 80                 ; char buf[80] = {};
+    ; sub     rsp, 80                 ; char buf[80] = {};
 
     mov     r9, rdi                 ; r9  = n
     movzx   r8d, dl                 ; r8d = mask
     lea     r10, [rel .digits_lut]  ; r10 = LUT
-    lea     rsi, [rsp+79]           ; rsi = &buf[79]; // Пишем с конца
+    ; lea     rsi, [rsp+79]           ; rsi = &buf[79]; // Пишем с конца
     xor     eax, eax                ; eax = 0 // counter
 
     test    r9, r9
@@ -54,17 +64,17 @@ putbase:
 
     movzx   edx, byte [r10 + rdx]   ; Получаем символ из LUT
     dec     rsi                     ;
-    mov     [rsi], dl               ; buf[--rsi] = dl
+    mov    [rsi], dl                ; buf[--rsi] = dl
     inc     eax                     ; ++counter
 
     test r9, r9
     jnz .convert
 
 .emit:
-    mov     rcx, rax
-    write   1, rsi, rcx
+    ; mov     rcx, rax
+    ; write   1, rsi, rcx
 
-    add     rsp, 80
+    ; add     rsp, 80
     pop     rbx
     ret
 
@@ -81,14 +91,53 @@ section .text
 ;
 ; IN:
 ;   rdi = a (number to print)
+;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
 ; OUT:
 ;   eax = number of bytes written
+;   rsi = start of string (buf filled from end)
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 puthex:
     mov  cl, 4
     mov  dl, 0xF
     jmp  putbase
+
+; =============================================================================
+; void putoct(uint64_t a)
+; =============================================================================
+; prints number in octal to stdout.
+;
+; IN:
+;   rdi = a (number to print)
+;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
+; OUT:
+;   eax = number of bytes written
+;   rsi = start of string (buf filled from end)
+; DESTR:
+;   rax, rcx, rdx, rdi, rsi
+putoct:
+    mov  cl, 3
+    mov  dl, 7
+    jmp  putbase
+
+; =============================================================================
+; void putbin(uint64_t a)
+; =============================================================================
+; prints number in binary to stdout.
+;
+; IN:
+;   rdi = a (number to print)
+;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
+; OUT:
+;   eax = number of bytes written
+;   rsi = start of string (buf filled from end)
+; DESTR:
+;   rax, rcx, rdx, rdi, rsi
+putbin:
+    mov  cl, 1
+    mov  dl, 1
+    jmp  putbase
+
 
 ; =============================================================================
 ; void putuint(uint64_t a)
@@ -103,7 +152,7 @@ puthex:
 ;   rax, rcx, rdx, rdi, rsi
 putuint:
 push rbx
-    sub rsp, 40
+    sub rsp, 80
     mov rax, rdi
     lea rsi, [rsp+39]
     xor rcx, rcx
@@ -135,7 +184,7 @@ push rbx
     write 1, rsi, rcx
     mov  eax, edx          ; rdx = rcx (set by write macro), survives syscall
 
-    add rsp, 40
+    add rsp, 80
     pop rbx
     ret
 
@@ -151,7 +200,7 @@ push rbx
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 putint:
-    sub rsp, 24
+    sub rsp, 80
     test rdi, rdi
     jns .putint_positive
 
@@ -165,45 +214,13 @@ putint:
 
     call putuint
     inc  eax               ; +1 for the '-' sign
-    add rsp, 24
+    add rsp, 80
     ret
 
 .putint_positive:
     call putuint           ; eax = digit count
-    add rsp, 24
+    add rsp, 80
     ret
-
-; =============================================================================
-; void putoct(uint64_t a)
-; =============================================================================
-; prints number in octal to stdout.
-;
-; IN:
-;   rdi = a (number to print)
-; OUT:
-;   eax = number of bytes written
-; DESTR:
-;   rax, rcx, rdx, rdi, rsi
-putoct:
-    mov  cl, 3
-    mov  dl, 7
-    jmp  putbase
-
-; =============================================================================
-; void putbin(uint64_t a)
-; =============================================================================
-; prints number in binary to stdout.
-;
-; IN:
-;   rdi = a (number to print)
-; OUT:
-;   eax = number of bytes written
-; DESTR:
-;   rax, rcx, rdx, rdi, rsi
-putbin:
-    mov  cl, 1
-    mov  dl, 1
-    jmp  putbase
 
 ; =============================================================================
 ; void putchar(char a)
@@ -217,11 +234,11 @@ putbin:
 ; DESTR:
 ;   rax, rdi, rsi, rdx
 putchar:
-    sub rsp, 16
+    sub rsp, 80
     mov byte [rsp], dil
     write 1, rsp, 1
     mov  eax, 1
-    add rsp, 16
+    add rsp, 80
     ret
 
 ; =============================================================================
@@ -523,7 +540,13 @@ printer.internal:
 .case_b:
     ; putbin(*arg_ptr)
     mov   rdi, [rdi]
+    sub   rsp, TMP_BUF_SIZE
+    lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  putbin
+    mov   rcx, rax
+    write 1, rsi, rcx
+    mov   rax, rcx
+    add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
 
 .case_c:
@@ -541,7 +564,13 @@ printer.internal:
 .case_o:
     ; putoct(*arg_ptr)
     mov   rdi, [rdi]
+    sub   rsp, TMP_BUF_SIZE
+    lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  putoct
+    mov   rcx, rax
+    write 1, rsi, rcx
+    mov   rax, rcx
+    add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
 
 .case_s:
@@ -559,7 +588,13 @@ printer.internal:
 .case_x:
     ; puthex(*arg_ptr)
     mov   rdi, [rdi]
+    sub   rsp, TMP_BUF_SIZE
+    lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  puthex
+    mov   rcx, rax
+    write 1, rsi, rcx
+    mov   rax, rcx
+    add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
 
 .case_default:
