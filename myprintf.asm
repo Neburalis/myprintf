@@ -37,7 +37,7 @@ TMP_BUF_SIZE equ 80
 ;   cl  = shift (1..5 corresponds base 2, 4, 8, 16, 32)
 ; OUT:
 ;   eax = number of bytes written
-;   rsi = start of string (buf filled from end)
+;   rsi -> start of string (buf filled from end)
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 putbase:
@@ -94,7 +94,7 @@ section .text
 ;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
 ; OUT:
 ;   eax = number of bytes written
-;   rsi = start of string (buf filled from end)
+;   rsi -> start of string (buf filled from end)
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 puthex:
@@ -112,7 +112,7 @@ puthex:
 ;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
 ; OUT:
 ;   eax = number of bytes written
-;   rsi = start of string (buf filled from end)
+;   rsi -> start of string (buf filled from end)
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 putoct:
@@ -130,7 +130,7 @@ putoct:
 ;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
 ; OUT:
 ;   eax = number of bytes written
-;   rsi = start of string (buf filled from end)
+;   rsi -> start of string (buf filled from end)
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 putbin:
@@ -146,15 +146,17 @@ putbin:
 ;
 ; IN:
 ;   rdi = a (number to print)
+;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
 ; OUT:
 ;   eax = number of bytes written
+;   rsi -> start of string (buf filled from end)
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 putuint:
 push rbx
-    sub rsp, 80
+    ; sub rsp, 80
     mov rax, rdi
-    lea rsi, [rsp+39]
+    ; lea rsi, [rsp+39]
     xor rcx, rcx
 
     test rax, rax
@@ -181,10 +183,10 @@ push rbx
     jnz .zaloop
 
 .emit:
-    write 1, rsi, rcx
-    mov  eax, edx          ; rdx = rcx (set by write macro), survives syscall
+    ; write 1, rsi, rcx
+    mov  eax, ecx          ; ecx = digit count
 
-    add rsp, 80
+    ; add rsp, 80
     pop rbx
     ret
 
@@ -195,31 +197,35 @@ push rbx
 ;
 ; IN:
 ;   rdi = a (number to print)
+;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
 ; OUT:
 ;   eax = number of bytes written (digits + 1 for '-' if negative)
+;   rsi -> start of string (buf filled from end)
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 putint:
-    sub rsp, 80
+    ; sub rsp, 80
     test rdi, rdi
     jns .putint_positive
 
-    mov byte [rsp+23], '-'
-    lea rsi, [rsp+23]
-    push rdi
-    write 1, rsi, 1
-    pop rdi
+    ; mov byte [rsp+23], '-'
+    ; lea rsi, [rsp+23]
+    ; push rdi
+    ; write 1, rsi, 1
+    ; pop rdi
 
     neg rdi
 
     call putuint
     inc  eax               ; +1 for the '-' sign
-    add rsp, 80
+    dec  rsi
+    mov  byte [rsi], '-'
+    ; add rsp, 80
     ret
 
 .putint_positive:
-    call putuint           ; eax = digit count
-    add rsp, 80
+    call putuint           ; eax = digit count ; rsi -> start of string
+    ; add rsp, 80
     ret
 
 ; =============================================================================
@@ -229,29 +235,33 @@ putint:
 ;
 ; IN:
 ;   dil = a (character to print)
+;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
 ; OUT:
 ;   eax = 1 (always one byte)
+;   rsi -> start of string (buf filled from end)
 ; DESTR:
 ;   rax, rdi, rsi, rdx
 putchar:
-    sub rsp, 80
-    mov byte [rsp], dil
-    write 1, rsp, 1
+    ; sub rsp, 80
+    mov byte [rsi], dil
+    ; write 1, rsp, 1
     mov  eax, 1
-    add rsp, 80
+    dec  rsi
+    ; add rsp, 80
     ret
 
 ; =============================================================================
 ; void putstr(char* str)
 ; =============================================================================
-; computes string length and writes entire string using one syscall.
+; computes string length; does NOT write — caller is responsible for the write.
 ;
 ; IN:
 ;   rdi = str (pointer to null-terminated string; NULL is treated as empty)
 ; OUT:
-;   eax = number of bytes written (0 for NULL or empty string)
+;   eax = string length (0 for NULL or empty string)
+;   rsi -> start of string
 ; DESTR:
-;   rax, rcx, rdi, rsi, rdx
+;   rax, rcx, rsi
 putstr:
     xor  eax, eax
     test rdi, rdi
@@ -266,10 +276,7 @@ putstr:
     jmp .len_loop
 
 .len_done:
-    test rcx, rcx
-    jz .empty
-    write 1, rsi, rcx
-    mov  eax, edx          ; rdx = rcx (set by write macro), survives syscall
+    mov  eax, ecx
 
 .empty:
     ret
@@ -474,8 +481,19 @@ printer.internal:
     je    .percent
 
     ; putchar(*fmt)
-    mov   rdi, rax
-    call  putchar
+    ; mov   rdi, rax
+    ; sub   rsp, TMP_BUF_SIZE
+    ; lea   rsi, [rsp+TMP_BUF_SIZE-1]
+    ; mov
+    ; call  putchar
+    ; mov   rcx, rax
+    ; write 1, rsi, rcx
+    ; mov   rax, rdx
+    ; add   rsp, TMP_BUF_SIZE
+    sub   rsp, 1
+    mov  [rsp], al
+    write 1, rsp, 1
+    add   rsp, 1
     add   r15d, eax
 
     ; ++fmt
@@ -495,8 +513,18 @@ printer.internal:
     cmp   al, '%'
     jne   .select_arg
 
-    mov   rdi, '%'
-    call  putchar
+    ; mov   rdi, '%'
+    ; sub   rsp, TMP_BUF_SIZE
+    ; lea   rsi, [rsp+TMP_BUF_SIZE-1]
+    ; call  putchar
+    ; mov   rcx, rax
+    ; write 1, rsi, rcx
+    ; mov   rax, rdx
+    ; add   rsp, TMP_BUF_SIZE
+    sub   rsp, 1
+    mov  [rsp], al
+    write 1, rsp, 1
+    add   rsp, 1
     add   r15d, eax
     inc   r12
     jmp   .loop
@@ -551,14 +579,31 @@ printer.internal:
 
 .case_c:
     ; putchar(*arg_ptr)
-    movzx edi, byte [rdi]
-    call  putchar
+    ; movzx edi, byte [rdi]
+    mov   al, byte [rdi]
+    ; sub   rsp, TMP_BUF_SIZE
+    ; lea   rsi, [rsp+TMP_BUF_SIZE-1]
+    ; call  putchar
+    ; mov   rcx, rax
+    ; write 1, rsi, rcx
+    ; mov   rax, rcx
+    ; add   rsp, TMP_BUF_SIZE
+    sub   rsp, 1
+    mov  [rsp], al
+    write 1, rsp, 1
+    add   rsp, 1
     jmp   .after_spec
 
 .case_d:
     ; putint(*arg_ptr)
     mov   rdi, [rdi]
+    sub   rsp, TMP_BUF_SIZE
+    lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  putint
+    mov   rcx, rax
+    write 1, rsi, rcx
+    mov   rax, rcx
+    add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
 
 .case_o:
@@ -577,12 +622,21 @@ printer.internal:
     ; putstr(arg_ptr)
     mov   rdi, [rdi]
     call  putstr
+    mov   rcx, rax
+    write 1, rsi, rcx
+    mov   rax, rcx
     jmp   .after_spec
 
 .case_u:
     ; putuint(*arg_ptr)
     mov   rdi, [rdi]
+    sub   rsp, TMP_BUF_SIZE
+    lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  putuint
+    mov   rcx, rax
+    write 1, rsi, rcx
+    mov   rax, rcx
+    add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
 
 .case_x:
