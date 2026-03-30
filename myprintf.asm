@@ -18,63 +18,61 @@ section .text
     %include "linux64_macro.asm"
 
 ; =============================================================================
-; void putbase(uint64_t n, uint64_t base)
+; void putbase(uint64_t n, uint8_t shift, uint8_t mask)
 ; =============================================================================
-; prints number in given base to stdout (supports bases 2–36).
+; prints number in base 2^shift to stdout (supports bases 2, 4, 8, 16, 32).
 ;
 ; IN:
-;   rdi = n    (number to print)
-;   rsi = base (2..36; values > 36 are silently ignored)
+;   rdi = n     (number to print)
+;   cl  = shift (1..5 corresponds base 2, 4, 8, 16, 32)
+;   dl  = mask  (base - 1)
 ; OUT:
-;   eax = number of bytes written (0 if base > 36)
+;   eax = number of bytes written
 ; DESTR:
-;   rax, rcx, rdx, rdi, rsi
+;   rax, rcx, rdx, rdi, rsi, r8-r11 (syscall)
 putbase:
-    push rbx
-    sub  rsp, 80
-    mov  rax, rdi
-    cmp  rsi, 36
-    ja  .early_exit
-    mov  rbx, rsi
-    lea  rsi, [rsp+79]
-    xor  rcx, rcx
+    push    rbx
+    sub     rsp, 80                 ; char buf[80] = {};
 
-    test rax, rax
-    jnz  .convert
+    mov     r9, rdi                 ; r9  = n
+    movzx   r8d, dl                 ; r8d = mask
+    lea     r10, [rel .digits_lut]  ; r10 = LUT
+    lea     rsi, [rsp+79]           ; rsi = &buf[79]; // Пишем с конца
+    xor     eax, eax                ; eax = 0 // counter
 
-    dec  rsi
-    mov  byte [rsi], '0'
-    inc  rcx
-    jmp  .emit
+    test    r9, r9
+    jnz     .convert
+
+    mov     byte [rsi], '0'
+    mov     al, 1
+    jmp     .emit
 
 .convert:
-    xor  edx, edx
-    div  rbx
-    cmp  dl, 10
-    jl   .decimal
-    add  dl, 'a' - 10
-    jmp  .store
-.decimal:
-    add  dl, '0'
-.store:
-    dec  rsi
-    mov  byte [rsi], dl
-    inc  rcx
-    test rax, rax
-    jnz  .convert
+    mov     edx, r9d
+    and     edx, r8d                ; Получили очередную цифру (0..31)
+    shr     r9,  cl                 ; r9 /= 2^shift
+
+    movzx   edx, byte [r10 + rdx]   ; Получаем символ из LUT
+    dec     rsi                     ;
+    mov     [rsi], dl               ; buf[--rsi] = dl
+    inc     eax                     ; ++counter
+
+    test r9, r9
+    jnz .convert
 
 .emit:
-    write 1, rsi, rcx
-    mov  eax, edx          ; rdx = rcx (set by write macro), survives syscall
-    jmp  .epilogue
+    mov     rcx, rax
+    write   1, rsi, rcx
 
-.early_exit:
-    xor  eax, eax          ; invalid base — nothing printed
-
-.epilogue:
-    add  rsp, 80
-    pop  rbx
+    add     rsp, 80
+    pop     rbx
     ret
+
+section .rodata align=64
+.digits_lut:
+    db "0123456789abcdefghijklmnopqrstuv"   ; 32 символа для base 2..32
+
+section .text
 
 ; =============================================================================
 ; void puthex(uint64_t a)
@@ -88,7 +86,8 @@ putbase:
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 puthex:
-    mov  rsi, 16
+    mov  cl, 4
+    mov  dl, 0xF
     jmp  putbase
 
 ; =============================================================================
@@ -186,7 +185,8 @@ putint:
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 putoct:
-    mov  rsi, 8
+    mov  cl, 3
+    mov  dl, 7
     jmp  putbase
 
 ; =============================================================================
@@ -201,7 +201,8 @@ putoct:
 ; DESTR:
 ;   rax, rcx, rdx, rdi, rsi
 putbin:
-    mov  rsi, 2
+    mov  cl, 1
+    mov  dl, 1
     jmp  putbase
 
 ; =============================================================================
