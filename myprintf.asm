@@ -15,6 +15,8 @@ section .text
     global putstr
     global printer
 
+    extern printf
+
     %include "linux64_macro.asm"
 
 struc buf
@@ -80,7 +82,7 @@ putbase:
 
 section .rodata align=64
 .digits_lut:
-    db "0123456789abcdefghijklmnopqrstuv"   ; 32 символа для base 2..32
+    db "0123456789ABCDEF"   ; 32 символа для base 2..32
 
 section .text
 
@@ -283,35 +285,23 @@ putstr:
 
 ; =============================================================================
 ; JmpTable:
-section .rodata
+section .data
 align 8
 
 ; Индекс: (*fmt - 'b')
 ; Диапазон: 'b'..'x'
 jmp_table:
-    dq printer.internal.case_b       - jmp_table ; 'b'
-    dq printer.internal.case_c       - jmp_table ; 'c'
-    dq printer.internal.case_d       - jmp_table ; 'd'
-    dq printer.internal.case_default - jmp_table ; 'e'
-    dq printer.internal.case_default - jmp_table ; 'f'
-    dq printer.internal.case_default - jmp_table ; 'g'
-    dq printer.internal.case_default - jmp_table ; 'h'
-    dq printer.internal.case_default - jmp_table ; 'i'
-    dq printer.internal.case_default - jmp_table ; 'j'
-    dq printer.internal.case_default - jmp_table ; 'k'
-    dq printer.internal.case_default - jmp_table ; 'l'
-    dq printer.internal.case_default - jmp_table ; 'm'
-    dq printer.internal.case_default - jmp_table ; 'n'
-    dq printer.internal.case_o       - jmp_table ; 'o'
-    dq printer.internal.case_default - jmp_table ; 'p'
-    dq printer.internal.case_default - jmp_table ; 'q'
-    dq printer.internal.case_default - jmp_table ; 'r'
-    dq printer.internal.case_s       - jmp_table ; 's'
-    dq printer.internal.case_default - jmp_table ; 't'
-    dq printer.internal.case_u       - jmp_table ; 'u'
-    dq printer.internal.case_default - jmp_table ; 'v'
-    dq printer.internal.case_default - jmp_table ; 'w'
-    dq printer.internal.case_x       - jmp_table ; 'x'
+    dq printer.internal.case_b       ; 'b'
+    dq printer.internal.case_c       ; 'c'
+    dq printer.internal.case_d       ; 'd'
+    times ('o' - 'd' - 1) dq printer.internal.case_default
+    dq printer.internal.case_o       ; 'o'
+    times ('s' - 'o' - 1) dq printer.internal.case_default
+    dq printer.internal.case_s       ; 's'
+    dq printer.internal.case_default ; 't'
+    dq printer.internal.case_u       ; 'u'
+    times ('x' - 'u' - 1) dq printer.internal.case_default
+    dq printer.internal.case_x       ; 'x'
 
 section .text
 
@@ -409,21 +399,29 @@ printer:
     ; 6th+ continue in caller stack at [rbp+16] after call/ret address
     push rbp
     mov  rbp, rsp
-    sub  rsp, 48
+    sub  rsp, 64
 
     mov  [rsp],    rsi
     mov  [rsp+8],  rdx
     mov  [rsp+16], rcx
     mov  [rsp+24], r8
     mov  [rsp+32], r9
+    mov  [rsp+40], rdi
 
     lea  rsi, [rsp]
     lea  rdx, [rbp+16]
     call printer.internal
 
-    add  rsp, 48
+    mov  rsi, [rsp]
+    mov  rdx, [rsp+8]
+    mov  rcx, [rsp+16]
+    mov  r8,  [rsp+24]
+    mov  r9,  [rsp+32]
+    mov  rdi, [rsp+40]
+    add  rsp, 64
     pop  rbp
-    ret
+
+    jmp printf wrt ..plt
 
 ; =============================================================================
 ; int32_t printer.internal(char *fmt, uint8_t *ptr1, uint8_t *ptr2)
@@ -492,7 +490,7 @@ printer.internal:
     ; add   rsp, TMP_BUF_SIZE
     sub   rsp, 1
     mov  [rsp], al
-    write 1, rsp, 1
+    write_no_pie 1, rsp, 1
     add   rsp, 1
     add   r15d, eax
 
@@ -523,7 +521,7 @@ printer.internal:
     ; add   rsp, TMP_BUF_SIZE
     sub   rsp, 1
     mov  [rsp], al
-    write 1, rsp, 1
+    write_no_pie 1, rsp, 1
     add   rsp, 1
     add   r15d, eax
     inc   r12
@@ -555,15 +553,26 @@ printer.internal:
     ; *fmt уже лежит в rax
 
     ; Нормализуем индекс: 'b' -> 0
-    sub   rax, 'b'
-    cmp   rax, ('x' - 'b') ; JT - диапазон 'b' - 'x'
-    ja    .case_default
+    ; sub   rax, 'b'
+    ; cmp   rax, ('x' - 'b') ; JT - диапазон 'b' - 'x'
+    ; ja    .case_default
+
+    cmp     rax, 'b'
+    jb      .case_default
+    cmp     rax, 'x'
+    ja      .case_default
+
+    lea     rdx, [rel jmp_table]
+    jmp     [rdx + (rax - 'b') * 8]
 
                                 ; qword* jmp_table = {labels};
-    lea   rdx, [rel jmp_table]  ; rdx = jmp_table
-    mov   rax, [rdx + rax*8]    ; rax = *(jmp_table + label) = label - jmp_table
-    add   rax, rdx              ; rax = rdx - jmp_table + (label - jmp_table) = label
-    jmp   rax
+    ; lea   rdx, [rel jmp_table]  ; rdx = jmp_table
+    ; mov   rax, [rdx + rax*8]    ; rax = *(jmp_table + label) = label - jmp_table
+    ; add   rax, rdx              ; rax = rdx - jmp_table + (label - jmp_table) = label
+    ; jmp   rax
+
+    ; lea   rdx, [rel jmp_table]
+    ; jmp   [rdx + rax*8]        ; читаем абсолютный адрес из таблицы и прыгаем
 
 .case_b:
     ; putbin(*arg_ptr)
@@ -572,7 +581,7 @@ printer.internal:
     lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  putbin
     mov   rcx, rax
-    write 1, rsi, rcx
+    write_no_pie 1, rsi, rcx
     mov   rax, rcx
     add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
@@ -590,7 +599,7 @@ printer.internal:
     ; add   rsp, TMP_BUF_SIZE
     sub   rsp, 1
     mov  [rsp], al
-    write 1, rsp, 1
+    write_no_pie 1, rsp, 1
     add   rsp, 1
     jmp   .after_spec
 
@@ -601,7 +610,7 @@ printer.internal:
     lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  putint
     mov   rcx, rax
-    write 1, rsi, rcx
+    write_no_pie 1, rsi, rcx
     mov   rax, rcx
     add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
@@ -613,7 +622,7 @@ printer.internal:
     lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  putoct
     mov   rcx, rax
-    write 1, rsi, rcx
+    write_no_pie 1, rsi, rcx
     mov   rax, rcx
     add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
@@ -623,7 +632,7 @@ printer.internal:
     mov   rdi, [rdi]
     call  putstr
     mov   rcx, rax
-    write 1, rsi, rcx
+    write_no_pie 1, rsi, rcx
     mov   rax, rcx
     jmp   .after_spec
 
@@ -634,7 +643,7 @@ printer.internal:
     lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  putuint
     mov   rcx, rax
-    write 1, rsi, rcx
+    write_no_pie 1, rsi, rcx
     mov   rax, rcx
     add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
@@ -646,7 +655,7 @@ printer.internal:
     lea   rsi, [rsp+TMP_BUF_SIZE-1]
     call  puthex
     mov   rcx, rax
-    write 1, rsi, rcx
+    write_no_pie 1, rsi, rcx
     mov   rax, rcx
     add   rsp, TMP_BUF_SIZE
     jmp   .after_spec
