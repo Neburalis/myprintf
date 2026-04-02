@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <math.h>
 
 extern int32_t myprintf(const char *fmt, ...);
 extern int32_t myfprintf(int fd, const char *fmt, ...);
@@ -8,7 +9,7 @@ int main(void) {
     myprintf("%s", "%% %d %c %s\n%b %o %x\n\n");
     myprintf("%% %d %c %s\n%b %o %x\n %d %s %x %d%%%c%b\n", (long) -1, 'x', "Hello", 12, 12, 12, (long) -1, "love", 3802, 100, 33, 126);
     myprintf("\n");
-    for (long i = 1; i < 100; i+=3) {
+    for (long i = 1; i < 10; i+=3) {
         // printf("%ld: %b %o %x\n", i, i, i, i);
         // fflush(stdout);
         myprintf("%d: %b %o %x\n", i, i, i, i);
@@ -18,13 +19,31 @@ int main(void) {
     // test myfprintf (fd=2 = stder)
     myfprintf(2, "--- myfprintf test ---\n");
     myfprintf(2, "fd=2: %d %s %x\n", 42, "hello", 255);
-    myfprintf(2, "\n");
+    myprintf("\n");
 
     // test snprintf
-    myfprintf(1, "--- mysnprintf test ---\n");
+    myprintf("--- mysnprintf test ---\n");
     char buf[64];
     int32_t n = mysnprintf(buf, sizeof(buf), "mysnprintf: %d %s %x", (long)-7, "world", 0xAB);
-    myfprintf(1, "mysnprintf returned %d, buf=[%s]\n", (long)n, buf);
+    myprintf("mysnprintf returned %d, buf=[%s]\n", (long)n, buf);
+    myprintf("\n");
+
+    // test %f
+    myfprintf(1, "--- %%f test ---\n");
+    myprintf("%f\n", 3.14);
+    myprintf("%f\n", -42.0);
+    myprintf("%f\n", 0.0);
+    myprintf("%d %f %d\n", 10, 2.718281828, 20);
+    myprintf("\n");
+
+    // test %p
+    myprintf("--- %%p test ---\n");
+    myprintf("%p\n", buf);
+    char *some_string = "some_string";
+    myprintf("%p\n", some_string);
+    double pi = M_PI;
+    myprintf("at [%p] stores (%f)\n", &pi, pi);
+    myprintf("\n");
 
     return 0;
 }

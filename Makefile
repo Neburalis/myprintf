@@ -10,6 +10,10 @@ TARGET   = myprintf.out
 # === default target ===
 all: $(TARGET)
 
+# === codegen ===
+myprintf.asm: generate_jmp_table.py
+	python3 generate_jmp_table.py myprintf.asm
+
 # === build ===
 myprintf.o: myprintf.asm
 	$(ASM) $(ASMFLAGS) $<

@@ -1,5 +1,6 @@
 ; =============================================================================
 ; myprintf.asm  - minimal demo for syscall-based printing and exit
+; pseudocode of this file is in readme.md
 ; =============================================================================
 
 default rel
@@ -256,6 +257,93 @@ putchar:
     ret
 
 ; =============================================================================
+; uint32_t put_double(double a, char *buf_end)
+; =============================================================================
+; Converts a double to decimal string with 6 fractional digits.
+; Fills buffer from end (same convention as other helpers).
+; Assumes: |a| < 2^63, no NaN/Inf.
+;
+; IN:
+;   rdi = a (raw IEEE 754 double bits)
+;   rsi -> buf  (end of print buffer. Should be no less than TMP_BUF_SIZE)
+; OUT:
+;   eax = number of bytes written
+;   rsi -> start of string (buf filled from end)
+; SAVED:
+;   rbx, r12, r13
+;
+put_double:
+    push rbx
+    push r12
+    push r13
+
+    mov  r12, rsi           ; r12 = end of buffer (save original rsi for final count)
+
+    ; --- sign ---
+    xor  ebx, ebx           ; ebx = sign flag (0 = positive)
+    test rdi, rdi
+    jns  .abs_done
+    inc  ebx                ; negative
+    btr  rdi, 63            ; clear sign bit → |a|
+.abs_done:
+    movq xmm0, rdi          ; xmm0 = |a|
+
+    ; --- integer part ---
+    cvttsd2si r13, xmm0     ; r13 = (int64)|a|  (truncate toward zero)
+    cvtsi2sd  xmm1, r13
+    subsd     xmm0, xmm1   ; xmm0 = fractional part ∈ [0, 1)
+
+    ; --- 6 fractional digits ---
+    ; Multiply frac by 10^6 → integer, then extract digits by division.
+    ; Division produces least-significant digit first, which fills buffer
+    ; right-to-left correctly (rightmost = least significant).
+    mulsd     xmm0, [rel million_double]  ; xmm0 = frac * 1000000
+    cvttsd2si rdi,  xmm0                  ; rdi = frac_integer (0..999999)
+
+    push r8
+    mov  r8, 10
+    mov  ecx, 6
+.frac_loop:
+    xor  edx, edx
+    mov  rax, rdi
+    div  r8                ; edx = digit (LSB first), rax = quotient
+    mov  rdi, rax
+    add  dl, '0'
+    dec  rsi
+    mov  byte [rsi], dl
+    dec  ecx
+    jnz  .frac_loop
+    pop  r8
+
+    ; --- decimal point ---
+    dec  rsi
+    mov  byte [rsi], '.'
+
+    ; --- integer digits (reuse putuint) ---
+    mov  rdi, r13
+    call putuint            ; rsi → start of integer digits, eax = int digit count
+
+    ; --- minus sign if negative ---
+    test ebx, ebx
+    jz   .no_sign
+    dec  rsi
+    mov  byte [rsi], '-'
+.no_sign:
+
+    mov  rax, r12
+    sub  rax, rsi           ; total bytes = end − current rsi
+
+    pop  r13
+    pop  r12
+    pop  rbx
+    ret
+
+; =============================================================================
+
+; #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#
+; Don't edit this part #
+; it's generated automatically by a generate_jmp_table.py script #
+
 ; JmpTable:
 section .data
 align 8
@@ -266,14 +354,28 @@ jmp_table:
     dq printer.internal.case_b       ; 'b'
     dq printer.internal.case_c       ; 'c'
     dq printer.internal.case_d       ; 'd'
-    times ('o' - 'd' - 1) dq printer.internal.case_default
+    dq printer.internal.case_default ; 'e'
+    dq printer.internal.case_f       ; 'f'
+    dq printer.internal.case_default ; 'g'
+    dq printer.internal.case_default ; 'h'
+    dq printer.internal.case_d       ; 'i'
+    dq printer.internal.case_default ; 'j'
+    dq printer.internal.case_default ; 'k'
+    dq printer.internal.case_default ; 'l'
+    dq printer.internal.case_default ; 'm'
+    dq printer.internal.case_default ; 'n'
     dq printer.internal.case_o       ; 'o'
-    times ('s' - 'o' - 1) dq printer.internal.case_default
+    dq printer.internal.case_x       ; 'p'
+    dq printer.internal.case_default ; 'q'
+    dq printer.internal.case_default ; 'r'
     dq printer.internal.case_s       ; 's'
     dq printer.internal.case_default ; 't'
     dq printer.internal.case_u       ; 'u'
-    times ('x' - 'u' - 1) dq printer.internal.case_default
+    dq printer.internal.case_default ; 'v'
+    dq printer.internal.case_default ; 'w'
     dq printer.internal.case_x       ; 'x'
+; end of generated part
+; #=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#
 
 section .text
 
@@ -555,16 +657,17 @@ printer.flush_no_overflow:
 ; DESTR:
 ;   rax, rcx, rdx, rsi, r8, r9
 ;
-; Stack frame layout (sub rsp, 576):
+; Stack frame layout (sub rsp, 640):
 ;   [rsp +   0 ..  39] : 5 register args (rsi, rdx, rcx, r8, r9)
 ;   [rsp +  40 ..  47] : saved fmt (rdi)
 ;   [rsp +  48 ..  63] : buf_t  { .string*, .capacity, .size }
 ;   [rsp +  64 .. 575] : PRINTER_BUF_SIZE-byte print buffer
+;   [rsp + 576 .. 639] : XMM save area (xmm0..xmm7, 8×8 bytes)
 ;
 myprintf:
     push rbp
     mov  rbp, rsp
-    sub  rsp, 576       ; 40 args + 8 fmt + 16 buf_t + 512 buffer (16-byte aligned)
+    sub  rsp, 640       ; 40 args + 8 fmt + 16 buf_t + 512 buffer + 64 xmm (16-byte aligned)
 
     mov  [rsp +  0], rsi
     mov  [rsp +  8], rdx
@@ -573,18 +676,29 @@ myprintf:
     mov  [rsp + 32], r9
     mov  [rsp + 40], rdi    ; save fmt
 
+    ; Save XMM args (xmm0..xmm7) for %f support
+    movq [rsp + 576], xmm0
+    movq [rsp + 584], xmm1
+    movq [rsp + 592], xmm2
+    movq [rsp + 600], xmm3
+    movq [rsp + 608], xmm4
+    movq [rsp + 616], xmm5
+    movq [rsp + 624], xmm6
+    movq [rsp + 632], xmm7
+
     ; Set up buf_t at [rsp+48]: string → [rsp+64], capacity = 512, size = 0
     lea  rax, [rsp + 64]
     mov  [rsp + 48 + buf.string],        rax
     mov  dword [rsp + 48 + buf.capacity], PRINTER_BUF_SIZE
     mov  dword [rsp + 48 + buf.size],     0
 
-    ; printer.internal(buf, flush, fmt, ptr1, ptr2)
+    ; printer.internal(buf, flush, fmt, ptr1, ptr2, ptr_xmm)
     lea  rdi, [rsp + 48]                ; buf_t*
     lea  rsi, [rel printer.flush]       ; flush fn
     mov  rdx, [rsp + 40]               ; fmt
     lea  rcx, [rsp + 0]                ; ptr1 (5 register args)
     lea  r8,  [rbp + 16]               ; ptr2 (caller stack args 6+)
+    lea  r9,  [rsp + 576]              ; ptr_xmm
     call printer.internal
 
     ; flush remaining buffer before jmp to printf
@@ -599,8 +713,16 @@ myprintf:
     mov  rcx, [rsp + 16]    ; 3rd arg
     mov  r8,  [rsp + 24]    ; 4th arg
     mov  r9,  [rsp + 32]    ; 5th arg
-    xor  al,  al            ; no XMM args
-    add  rsp, 576
+    movq xmm0, [rsp + 576]  ; restore xmm0 for libc printf trampoline
+    movq xmm1, [rsp + 584]
+    movq xmm2, [rsp + 592]
+    movq xmm3, [rsp + 600]
+    movq xmm4, [rsp + 608]
+    movq xmm5, [rsp + 616]
+    movq xmm6, [rsp + 624]
+    movq xmm7, [rsp + 632]
+    mov  al,   8            ; up to 8 XMM args used
+    add  rsp, 640
     pop  rbp
     jmp  printf wrt ..plt
 
@@ -617,18 +739,19 @@ myprintf:
 ; OUT:
 ;   eax = total bytes written (or negative on error)
 ;
-; Stack frame layout (sub rsp, 592; X%16==0 → aligned):
+; Stack frame layout (sub rsp, 656; X%16==0 → aligned):
 ;   [rsp +  0 ..  39] : 5 variadic reg args (rdx, rcx, r8, r9, [rbp+16])
 ;   [rsp + 40 ..  47] : saved fmt (rsi)
 ;   [rsp + 48 ..  55] : saved fd  (rdi)
 ;   [rsp + 56 ..  71] : buf_t  { .string*, .capacity, .size }
 ;   [rsp + 72 ..  79] : fd for flush_to_fd (buf_t offset 16)
 ;   [rsp + 80 .. 591] : PRINTER_BUF_SIZE-byte print buffer
+;   [rsp + 592 .. 655] : XMM save area (xmm0..xmm7, 8×8 bytes)
 ;
 myfprintf:
     push rbp
     mov  rbp, rsp
-    sub  rsp, 592               ; 592 % 16 == 0 → remains aligned after push rbp
+    sub  rsp, 656               ; 656 % 16 == 0 → remains aligned after push rbp
 
     ; spill 4 variadic register args + first caller-stack arg → ptr1[0..4]
     mov  [rsp +  0], rdx        ; arg1
@@ -640,6 +763,16 @@ myfprintf:
     mov  [rsp + 40], rsi        ; save fmt
     mov  [rsp + 48], rdi        ; save fd
 
+    ; Save XMM args (xmm0..xmm7) for %f support
+    movq [rsp + 592], xmm0
+    movq [rsp + 600], xmm1
+    movq [rsp + 608], xmm2
+    movq [rsp + 616], xmm3
+    movq [rsp + 624], xmm4
+    movq [rsp + 632], xmm5
+    movq [rsp + 640], xmm6
+    movq [rsp + 648], xmm7
+
     ; Set up buf_t at [rsp+56]: string → [rsp+80], capacity=512, size=0
     lea  rax, [rsp + 80]
     mov  [rsp + 56 + buf.string],         rax
@@ -649,12 +782,13 @@ myfprintf:
     mov  eax, dword [rsp + 48]
     mov  dword [rsp + 72], eax
 
-    ; printer.internal(buf_fd, flush_to_fd, fmt, ptr1, ptr2)
+    ; printer.internal(buf_fd, flush_to_fd, fmt, ptr1, ptr2, ptr_xmm)
     lea  rdi, [rsp + 56]                    ; buf_fd_t* (compatible with buf_t*)
     lea  rsi, [rel printer.flush_to_fd]
     mov  rdx, [rsp + 40]                    ; fmt
     lea  rcx, [rsp + 0]                     ; ptr1 (5 variadic args)
     lea  r8,  [rbp + 24]                    ; ptr2 (caller-stack args 6+)
+    lea  r9,  [rsp + 592]                   ; ptr_xmm
     call printer.internal
 
     ; final flush
@@ -663,7 +797,7 @@ myfprintf:
     call printer.flush_to_fd
     pop  rax                                ; restore result (ignore flush result)
 
-    add  rsp, 592
+    add  rsp, 656
     pop  rbp
     ret
 
@@ -682,17 +816,18 @@ myfprintf:
 ; OUT:
 ;   eax = bytes written, or -1 on overflow
 ;
-; Stack frame layout (sub rsp, 80; X%16==0 → aligned):
+; Stack frame layout (sub rsp, 144; X%16==0 → aligned):
 ;   [rsp +  0 ..  39] : 5 variadic reg args (rcx, r8, r9, [rbp+16], [rbp+24])
 ;   [rsp + 40 ..  47] : saved fmt (rdx)
 ;   [rsp + 48 ..  55] : saved dst (rdi)
 ;   [rsp + 56 ..  63] : saved n   (esi, uint32 in low dword)
 ;   [rsp + 64 ..  79] : buf_t { .string*=dst, .capacity=n, .size=0 }
+;   [rsp + 80 .. 143] : XMM save area (xmm0..xmm7, 8×8 bytes)
 ;
 mysnprintf:
     push rbp
     mov  rbp, rsp
-    sub  rsp, 80                ; 80 % 16 == 0 → aligned
+    sub  rsp, 144               ; 144 % 16 == 0 → aligned
 
     ; spill 3 variadic register args + first two caller-stack args → ptr1[0..4]
     mov  [rsp +  0], rcx        ; arg1
@@ -706,17 +841,28 @@ mysnprintf:
     mov  [rsp + 48], rdi        ; save dst
     mov  dword [rsp + 56], esi  ; save n
 
+    ; Save XMM args (xmm0..xmm7) for %f support
+    movq [rsp +  80], xmm0
+    movq [rsp +  88], xmm1
+    movq [rsp +  96], xmm2
+    movq [rsp + 104], xmm3
+    movq [rsp + 112], xmm4
+    movq [rsp + 120], xmm5
+    movq [rsp + 128], xmm6
+    movq [rsp + 136], xmm7
+
     ; Set up buf_t at [rsp+64]: string=dst, capacity=n, size=0
     mov  [rsp + 64 + buf.string],         rdi
     mov  dword [rsp + 64 + buf.capacity], esi
     mov  dword [rsp + 64 + buf.size],     0
 
-    ; printer.internal(buf, flush_no_overflow, fmt, ptr1, ptr2)
+    ; printer.internal(buf, flush_no_overflow, fmt, ptr1, ptr2, ptr_xmm)
     lea  rdi, [rsp + 64]                      ; buf_t*
     lea  rsi, [rel printer.flush_no_overflow]
     mov  rdx, [rsp + 40]                      ; fmt
     lea  rcx, [rsp + 0]                       ; ptr1
     lea  r8,  [rbp + 32]                      ; ptr2 (caller-stack args 6+)
+    lea  r9,  [rsp + 80]                      ; ptr_xmm
     call printer.internal
 
     ; no final flush — data is already in dst
@@ -729,7 +875,7 @@ mysnprintf:
     mov  byte [rdi + rcx], 0                  ; dst[buf.size] = '\0'
 .no_null:
 
-    add  rsp, 80
+    add  rsp, 144
     pop  rbp
     ret
 
@@ -798,25 +944,27 @@ mysnprintf:
 
 ; =============================================================================
 ; int32_t printer.internal(buf_t *buf, flush_buf_t flush, char *fmt,
-;                          uint8_t *ptr1, uint8_t *ptr2)
+;                          uint8_t *ptr1, uint8_t *ptr2, double *ptr_xmm)
 ; =============================================================================
 ; core format-string loop; called directly by printer trampoline.
 ;
 ; IN:
-;   rdi = buf    (buf_t* — output buffer)
-;   rsi = flush  (flush_buf_t — flush callback)
-;   rdx = fmt    (pointer to format string)
-;   rcx = ptr1   (pointer to args 1–5, each 8 bytes)
-;   r8  = ptr2   (pointer to args 6+ on caller stack)
+;   rdi = buf     (buf_t* — output buffer)
+;   rsi = flush   (flush_buf_t — flush callback)
+;   rdx = fmt     (pointer to format string)
+;   rcx = ptr1    (pointer to integer args 1–5, each 8 bytes)
+;   r8  = ptr2    (pointer to integer args 6+ on caller stack)
+;   r9  = ptr_xmm (pointer to 8×8-byte XMM save area: xmm0..xmm7)
 ; OUT:
 ;   eax = total bytes written (or negative on error)
 ; SAVED:
 ;   rbp, rbx, r12, r13, r14, r15
 ; LOCAL (rsp-relative after sub 104):
-;   [rsp +  0] = ptr2    (8 bytes)
-;   [rsp +  8] = total   (int32_t)
-;   [rsp + 12] = pad     (4 bytes)
-;   [rsp + 16] = tmp_buf (TMP_BUF_SIZE bytes)
+;   [rsp +  0] = ptr2      (8 bytes)
+;   [rsp +  8] = total     (int32_t)
+;   [rsp + 12] = xmm_count (int32_t)  ← float arg counter (was pad)
+;   [rsp + 16] = tmp_buf   (TMP_BUF_SIZE bytes)
+;   [rsp + 96] = ptr_xmm   (8 bytes)  ← in former alignment slack
 ; REGISTER MAP during loop:
 ;   r12 = buf,  r13 = flush,  r14 = fmt,  r15 = ptr1,  rbx = arg_count
 ;
@@ -838,6 +986,8 @@ printer.internal:
     mov  r15, rcx           ; r15 = ptr1
     mov  [rsp], r8          ; [rsp+0] = ptr2
     mov  dword [rsp+8], 0   ; total = 0
+    mov  dword [rsp+12], 0  ; xmm_count = 0
+    mov  [rsp+96], r9       ; ptr_xmm
     xor  ebx, ebx           ; arg_count = 0
 
 .loop:
@@ -934,6 +1084,28 @@ printer.internal:
     call putint
     jmp  .put_tmp
 
+.case_f:
+    ; %f — load raw double bits from XMM save area (independent of integer arg_count)
+    mov  ecx, dword [rsp + 12]    ; ecx = xmm_count
+    mov  rax, [rsp + 96]          ; rax = ptr_xmm
+    shl  rcx, 3                   ; * 8
+    mov  rdi, [rax + rcx]         ; rdi = raw double bits
+    lea  rsi, [rsp + 16 + TMP_BUF_SIZE - 1]
+    call put_double
+    ; put result to output buffer
+    mov  rdx, rsi
+    mov  ecx, eax
+    mov  rdi, r12
+    mov  rsi, r13
+    call put_to_buf
+    test eax, eax
+    js   .ret_err
+    add  dword [rsp+8], eax
+    ; increment xmm_count only (NOT ebx = integer arg_count)
+    inc  dword [rsp + 12]
+    inc  r14
+    jmp  .loop
+
 .case_o:
     mov  rdi, [rdi]
     lea  rsi, [rsp + 16 + TMP_BUF_SIZE - 1]
@@ -1003,3 +1175,6 @@ printer.internal:
     ret
 
 section .data
+
+ten_double      dq 10.0
+million_double  dq 1000000.0
